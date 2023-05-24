@@ -1,0 +1,10 @@
+node_modules/
+*.mp3
+*.mp4
+*.mpeg
+*.mpga
+*.m4a
+*.wav
+*.webm
+.DS_Store
+*.out
