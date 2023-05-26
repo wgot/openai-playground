@@ -1,6 +1,5 @@
 import { Configuration, OpenAIApi } from 'openai'
 import axios, { AxiosError } from 'axios'
-import { encode, decode } from 'gpt-3-encoder'
 
 declare module 'axios' {
   export interface AxiosRequestConfig {
@@ -9,23 +8,14 @@ declare module 'axios' {
   }
 }
 
-/**
- * `text`を`max_tokens`単位の文に分割して`prompt[]`を作成する
- * @see https://platform.openai.com/docs/models/gpt-4
- */
-export const splitTextIntoPrompts = (text: string, max_tokens: number = 8192): string[] => {
-  const tokens = text.split(/(?<=[。！？.!?])/)
-    .flatMap((sentence, index) => index === 0 && encode(sentence).length > max_tokens ? sentence.split(' ').map(s => s.concat(' ')) : sentence) /** 分割に失敗した場合のケア */
-    .map(sentence => encode(sentence))
-    .reduce<number[][]>((tokens, token) => {
-      const prompt = tokens.splice(-1)[0]
-      return max_tokens > prompt.length + token.length
-        ? [...tokens, [...prompt, ...token]]
-        : [...tokens, prompt, token]
-    }, [[]])
-  return tokens.map(token => decode(token))
+export const models = {
+  'gpt-3.5-turbo': 4096,
+  'gpt-4': 8192,
+  'gpt-4-32k': 32768,
 }
-export const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+export type Model = keyof typeof models
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 const whisperPayloadSizeLimit = 25 * 1024 * 1024
 const axiosInstance = axios.create({ retries: 3, maxBodyLength: whisperPayloadSizeLimit, maxContentLength: whisperPayloadSizeLimit })
