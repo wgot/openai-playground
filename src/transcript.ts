@@ -24,7 +24,11 @@ class Transcript {
     this.toEng = toEng
   }
 
-  private toMp3 = async (input_file: string, max_duration_sec = 1800) => {
+  /**
+   * 25min > 25mb / 128kbps
+   * 1600 = (25 * 1024 * 1024) / (128 * 1024 / 8)
+   */
+  private toMp3 = async (input_file: string, max_duration_sec = 1500) => {
     const duration_sec = await new Promise<number>((resolve, reject) =>
       ffmpeg.ffprobe(input_file, (err, metadata) => err ? reject(err) : resolve(Number(metadata.format.duration))))
     const times = Math.ceil(duration_sec / max_duration_sec)
@@ -33,7 +37,7 @@ class Transcript {
         const stream = new PassThrough()
         ffmpeg(input_file)
           .format('mp3')
-          .audioBitrate(64)
+          .audioBitrate(128)
           .seekInput(duration_sec / times * index)
           .duration(duration_sec / times)
           .pipe(stream)
