@@ -17,8 +17,8 @@ export type Model = keyof typeof models
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-const whisperPayloadSizeLimit = 25 * 1024 * 1024
-const axiosInstance = axios.create({ retries: 3, maxBodyLength: whisperPayloadSizeLimit, maxContentLength: whisperPayloadSizeLimit })
+export const whisperPayloadSizeLimit = 25 * 1024 * 1024
+const axiosInstance = axios.create({ retries: Infinity, maxBodyLength: whisperPayloadSizeLimit, maxContentLength: whisperPayloadSizeLimit })
 
 axiosInstance.interceptors.response.use(response => response, async (error: AxiosError) => {
   const request = error.config
@@ -32,6 +32,10 @@ axiosInstance.interceptors.response.use(response => response, async (error: Axio
     }
   }
   return Promise.reject(error)
+})
+axiosInstance.interceptors.request.use(request => {
+  process.env.DEBUG && console.debug(`\n${new Date().toISOString()} ${request.method?.toUpperCase()} ${request.url}\n`)
+  return request
 })
 
 const client = new OpenAIApi(new Configuration({ apiKey: process.env.OPENAI_API_KEY }), undefined, axiosInstance)

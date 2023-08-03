@@ -8,3 +8,4 @@ node_modules/
 *.webm
 .DS_Store
 *.out
+Makefile

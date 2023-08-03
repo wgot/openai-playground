@@ -1,4 +1,4 @@
-import { encode, decode } from 'gpt-3-encoder'
+import { encode, decode } from 'gpt-tokenizer'
 import { splitTextIntoPrompts } from '../src/summarize'
 
 describe('文章を分割できる', () => {
