@@ -1,45 +1,49 @@
 import { Command } from 'commander'
 import { join } from 'path'
 import { summarize } from './summarize'
+import { Transform } from 'stream'
 import { writeFileSync } from 'fs'
 import readline from 'readline'
 import Transcribe from './transcribe'
 
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-const realtimeTranscriptionHandler = async (transcribe: Transcribe, summary: boolean) => {
+const realtimeTranscriptionHandler = async (transcribe: Transcribe) => {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
   const stream = transcribe.start()
-  stream.pipe(process.stdout)
+  const transform = new Transform({ transform(chunk, _, callback) { callback(null, `[${new Date().toISOString()}] ${chunk.toString()}`) } })
+  stream
+    .pipe(transform)
+    .pipe(process.stdout)
   /** @todo 実行中 prompt(whisper) を追加/修正可能にする */
-  rl.on('line', async (input) => {
-    if (!input.length) { /** Enter */
-      const summary = await summarize(transcribe.transcripts.join('\n'))
-      console.log('\n\nSummary:', summary)
-    } else { /** some input then Enter */
-      console.log('\n\nUser:', input)
-      const summary = await summarize(transcribe.transcripts.join('\n'), input) /** experimental */
-      console.log('\n\nAssistant:', summary)
-    }
+  rl.on('SIGINT', async () => {
+    console.log('\nFile Save Processing...')
+    const filePath = await transcribe.stop()
+    console.log(`\nFile Saved: ${filePath}`)
+    process.exit()
   })
-  process.on('SIGINT', async () => { /** Cmd (Ctrl) + C */
-    await transcribe.stop()
-    if (summary) {
-      const summary = await summarize(transcribe.transcripts.splice(-Infinity).join('\n'))
-      console.log('\n\nSummary:', summary)
+  rl.on('line', async (input) => {
+    switch (input) {
+      case '':
+        if (transcribe.transcripts.length > 0) {
+          console.log('Summarize..')
+          console.log('Summary:', await summarize(transcribe.transcripts.join('\n')))
+        }
+        break
+      default:
+        console.log('User:', input)
+        console.log('Assistant:', await summarize(transcribe.transcripts.join('\n'), input))
     }
-    process.exit(0)
   })
 }
 
 const fileTranscriptionHandler = async (transcribe: Transcribe, summary: boolean, input: string, output: string) => {
   const transcript = await transcribe.fromAudioFile(input)
-  console.log(`${transcript}\n\n`)
   if (summary) {
     const summary = await summarize(transcript)
-    console.log('\n\nSummary:', summary)
+    console.log('\nSummary:', summary)
   }
   if (output)
     writeFileSync(join(output, `${input}.log`), `${transcript}\n\n${summary}`)
-  process.exit(0)
+  process.exit()
 }
 
 const program = new Command()
@@ -56,7 +60,7 @@ program
     const { input, prompt, source, summarize, output } = program.opts()
     const transcribe = new Transcribe({ prompt, source, output })
     if (!input) {
-      await realtimeTranscriptionHandler(transcribe, summarize)
+      await realtimeTranscriptionHandler(transcribe)
     } else {
       await fileTranscriptionHandler(transcribe, summarize, input, output)
     }

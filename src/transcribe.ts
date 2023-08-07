@@ -21,6 +21,7 @@ class Transcribe {
   private buffer: Buffer[] = []
   private rtAudio!: RtAudio
   private sampleRate!: number
+  private nChannels!: number
   private mp3Bitrate: number = 128
   private frameSize: number = 1920
   private frameVolumes: number[] = []
@@ -51,14 +52,15 @@ class Transcribe {
   /** @see https://github.com/almoghamdani/audify */
   private initializeAudioDevice = () => {
     this.rtAudio = new RtAudio()
-    const device = this.rtAudio.getDevices().find(device => device.isDefaultInput)!
-    const { id, inputChannels, preferredSampleRate } = device
+    const { name, id, inputChannels, preferredSampleRate } = this.rtAudio.getDevices().find(device => device.isDefaultInput)!
+    console.log(`Input Audio Device: ${name}`)
+    this.nChannels = inputChannels
     this.sampleRate = preferredSampleRate
     this.rtAudio.openStream(
       null,
       {
         deviceId: id,
-        nChannels: inputChannels,
+        nChannels: this.nChannels,
       },
       RtAudioFormat.RTAUDIO_SINT16,
       preferredSampleRate,
@@ -73,12 +75,11 @@ class Transcribe {
         return this.rtAudio.write(Buffer.from([]))
       },
       null,
-      RtAudioStreamFlags.RTAUDIO_ALSA_USE_DEFAULT,
     )
   }
 
   /** 無音区間を検出する */
-  private isSilent = (pcm: Buffer, seconds: number = 3, threshold: number = 0.05) => {
+  private isSilent = (pcm: Buffer, seconds: number = 3, threshold: number = 0.01) => {
     const maxVolume = pcm.reduce((value, _, index, pcm) => {
       if (index % 2 !== 0) return value
       const sample = Buffer.from(pcm.buffer).readInt16LE(index)
@@ -89,10 +90,6 @@ class Transcribe {
     const frames = this.sampleRate / this.frameSize * seconds
     if (segments > frames)
       this.frameVolumes.shift()
-
-    // const avgVolume = this.frameVolumes.reduce((total, current) => total + current, 0) / this.frameVolumes.length
-    // process.env.DEBUG && console.debug(`Average Volume: ${avgVolume}`)
-
     return this.frameVolumes.slice(-frames)
       .every((volume) => threshold > volume)
   }
@@ -130,19 +127,42 @@ class Transcribe {
   }
 
   private convertRawToWav = async (bin: Buffer) => {
-    const float32ArrayData = new Float32Array(bin.length / 2).map((_, index) => bin.readInt16LE(index * 2) / 32768)
+    const convertSampleToFloat32 = (bin: Buffer, index: number, channel: number) =>
+      bin.readInt16LE((index * this.nChannels + channel) * 2) / 32768
+    const getRMS = (data: Float32Array) =>
+      Math.sqrt(data.reduce((sum, val) => sum + val * val, 0) / data.length)
+    const getAllChannelData = (bin: Buffer): Float32Array[] => {
+      const dataLength = bin.length / (2 * this.nChannels)
+      return [...Array(this.nChannels)].map((_, channel) =>
+        new Float32Array(dataLength).map((_, i) =>
+          convertSampleToFloat32(bin, i, channel)
+        )
+      )
+    }
+    const allChannelData = getAllChannelData(bin)
+    const rmsValues = allChannelData.map(getRMS)
+    const maxRMS = Math.max(...rmsValues)
+    const normalizedChannelData = allChannelData.map((channelData, index) => {
+      const gain = maxRMS / rmsValues[index]
+      return channelData.map(sample => sample * gain)
+    })
+    const dataLength = bin.length / (2 * this.nChannels)
+    const monoData = new Float32Array(dataLength).map((_, i) => {
+      const sum = normalizedChannelData.reduce((acc, channelData) => acc + channelData.at(i)!, 0)
+      return sum / this.nChannels
+    })
     const encoded = await encode({
-      sampleRate: this.sampleRate!,
-      channelData: [float32ArrayData]
+      sampleRate: this.sampleRate,
+      channelData: [monoData],
     })
     return encoded
   }
 
   /** @see https://github.com/openai/openai-node/issues/77#issuecomment-1455247809 */
-  private emitTranscription = async () => {
-    if (this.tmp.length > 0) {
-      const bin = Buffer.concat(this.tmp.splice(-Infinity))
-      const encoded = await this.convertRawToWav(bin)
+  private emitTranscription = async (intervalSec: number) => {
+    const maxLength = this.sampleRate / this.frameSize * intervalSec
+    if (this.tmp.length >= maxLength * 0.8) {
+      const encoded = await this.convertRawToWav(Buffer.concat(this.tmp.splice(-Infinity)))
       const stream = Readable.from(Buffer.from(encoded)) as FileStream
       stream.lastModified = this.rtAudio.streamTime
       stream.name = `${stream.lastModified}.wav`
@@ -152,25 +172,25 @@ class Transcribe {
     }
   }
 
-  private saveAudio = () => new Promise(async resolve => {
+  private saveAudio = () => new Promise<string>(async resolve => {
     const wav = await this.convertRawToWav(Buffer.concat(this.buffer.splice(-Infinity)))
     const [yyyy, MM, dd, hh, mm] = new Date().toISOString().split(/[-:TZ]/)
-    const filePath = join(this.output ?? './', `${[yyyy, MM, dd, hh, mm].join('-')}.mp3`)
+    const filePath = join(this.output ?? './.output', `${[yyyy, MM, dd, hh, mm].join('-')}.mp3`)
     ffmpeg(Readable.from(Buffer.from(wav)))
       .format('mp3')
       .audioBitrate(this.mp3Bitrate)
       .saveToFile(filePath)
-      .on('end', resolve)
+      .on('end', () => resolve(filePath))
   })
 
-  start = () => {
+  start = (intervalSec: number = 60) => {
     this.rtAudio.start()
-    this.interval = setInterval(async () => await this.emitTranscription(), 30 * 1000)
-    this.textStream.on('data', chunk => this.transcripts.push(chunk))
+    this.interval = setInterval(async (intervalSec) => await this.emitTranscription(intervalSec), intervalSec * 1000, intervalSec)
+    this.textStream.on('data', chunk => this.transcripts.push(`${chunk}\n`))
     return this.textStream
   }
 
-  stop = () => new Promise(async resolve => {
+  stop = () => new Promise(resolve => {
     this.rtAudio.stop()
     clearInterval(this.interval)
     this.interval = undefined

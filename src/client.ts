@@ -25,7 +25,8 @@ axiosInstance.interceptors.response.use(response => response, async (error: Axio
   request.retryCount ??= 0
   request.retries ??= 0
   if (request.retryCount < request.retries) {
-    if (error.response && error.response.status >= 500) {
+    const status = Number(error?.response?.status)
+    if (status >= 500 || status === 429) {
       request.retryCount += 1
       await sleep(request.retryCount * 1000)
       return axiosInstance(request)
