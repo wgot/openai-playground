@@ -42,7 +42,7 @@ const fileTranscriptionHandler = async (transcribe: Transcribe, summary: boolean
     console.log('\nSummary:', summary)
   }
   if (output)
-    writeFileSync(join(output, `${input}.log`), `${transcript}\n\n${summary}`)
+    writeFileSync(join(output ?? '', `${input}.log`), `${transcript}\n\n${summary}`)
   process.exit()
 }
 

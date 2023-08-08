@@ -27,17 +27,17 @@ class Transcribe {
   private frameVolumes: number[] = []
   private interval?: NodeJS.Timer
   private prompt?: string
-  private source?: string
-  private toEng?: boolean
-  private output?: string
+  private source: string
+  private toEng: boolean
+  private output: string
   private textStream: Readable = new PassThrough()
-  constructor({ prompt, source, toEng, output }: { prompt?: string, source?: string, toEng?: boolean, output: string }) {
-    this.validatePrompt(prompt)
+  constructor({ prompt, source, toEng, output }: { prompt?: string, source?: string, toEng?: boolean, output?: string }) {
     this.initializeAudioDevice()
+    prompt && this.validatePrompt(prompt)
     this.prompt = prompt
-    this.source = source
-    this.toEng = toEng
-    this.output = output
+    this.source = source ?? 'ja'
+    this.toEng = toEng ?? false
+    this.output = output ?? './.output'
   }
 
   /**
@@ -52,8 +52,7 @@ class Transcribe {
   /** @see https://github.com/almoghamdani/audify */
   private initializeAudioDevice = () => {
     this.rtAudio = new RtAudio()
-    const { name, id, inputChannels, preferredSampleRate } = this.rtAudio.getDevices().find(device => device.isDefaultInput)!
-    console.log(`Input Audio Device: ${name}`)
+    const { id, inputChannels, preferredSampleRate } = this.rtAudio.getDevices().find(device => device.isDefaultInput)!
     this.nChannels = inputChannels
     this.sampleRate = preferredSampleRate
     this.rtAudio.openStream(
@@ -175,7 +174,7 @@ class Transcribe {
   private saveAudio = () => new Promise<string>(async resolve => {
     const wav = await this.convertRawToWav(Buffer.concat(this.buffer.splice(-Infinity)))
     const [yyyy, MM, dd, hh, mm] = new Date().toISOString().split(/[-:TZ]/)
-    const filePath = join(this.output ?? './.output', `${[yyyy, MM, dd, hh, mm].join('-')}.mp3`)
+    const filePath = join(this.output, `${[yyyy, MM, dd, hh, mm].join('-')}.mp3`)
     ffmpeg(Readable.from(Buffer.from(wav)))
       .format('mp3')
       .audioBitrate(this.mp3Bitrate)
